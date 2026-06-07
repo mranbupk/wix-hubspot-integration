@@ -1,0 +1,5 @@
+{
+  "$schema": "https://dev.wix.com/wix-cli/schemas/wix-config.json",
+  "appId": "aa3ba9dd-9df1-4ff5-b315-515f399cf4f8",
+  "projectId": "wix-hubspot-integration"
+}

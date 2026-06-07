@@ -1,0 +1,5 @@
+{
+  "$schema": "https://dev.wix.com/wix-cli/schemas/dashboard-page.json",
+  "id": "eed5a092-bd89-4dbd-8f14-abe4bb4df3bc",
+  "title": "My Custom App"
+}
