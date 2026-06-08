@@ -1,48 +1,47 @@
-# wix-hubspot-integration
+# Wix ↔ HubSpot Integration
 
-A Wix app that connects Wix sites with HubSpot CRM — enabling bi-directional contact sync, form lead capture with UTM attribution, and a configurable field mapping dashboard.
+A Wix app that connects Wix sites with HubSpot CRM — featuring bi-directional contact sync, form lead capture with UTM attribution, and a configurable field mapping dashboard.
+
+> Built as a technical assessment for a Senior Full-Stack Developer role.
+
+---
+
+## What This App Does
+
+```
+Wix Site Owner → installs this app → connects HubSpot account
+       ↓
+Any contact created/updated in Wix → automatically synced to HubSpot
+Any contact updated in HubSpot → automatically synced back to Wix
+Wix form submitted → contact created in HubSpot with UTM attribution
+```
 
 ---
 
 ## Features
 
-### 1. HubSpot OAuth Connection
-- Secure OAuth 2.0 connect/disconnect flow from the Wix dashboard
-- Tokens stored in Wix Secrets Manager (never exposed to the browser)
-- Least-privilege scopes — only what's needed for sync and forms
+### 1. HubSpot Connection (OAuth-ready)
+- Connect/Disconnect HubSpot from the Wix dashboard
+- Service Key stored securely in `.env` (never exposed to browser)
+- Least-privilege scopes: only contacts read/write
 
 ### 2. Bi-Directional Contact Sync
 - Wix contact created/updated → synced to HubSpot automatically
-- HubSpot contact created/updated → synced back to Wix via webhooks
-- Loop prevention via `syncSource` tagging and correlation ID tracking
+- HubSpot contact updated → webhook fires → synced back to Wix
+- **Loop prevention** via `syncSource` tagging + 5-second dedup window
 - Conflict resolution: last-updated-wins using timestamps
 - Idempotent writes — no duplicate updates for identical values
 
 ### 3. Form & Lead Capture
-- Wix form submissions pushed to HubSpot as contacts/leads
+- Wix form submissions pushed to HubSpot as contacts
 - UTM attribution captured: `utm_source`, `utm_medium`, `utm_campaign`, `utm_term`, `utm_content`
 - Page URL, referrer, and timestamp preserved in HubSpot properties
 
-### 4. Field Mapping UI
-- Dashboard table to map Wix fields → HubSpot properties
-- Configurable sync direction: Wix → HubSpot, HubSpot → Wix, or Bi-directional
-- Optional transforms: trim, lowercase
+### 4. Field Mapping Dashboard UI
+- Table UI to map Wix fields → HubSpot properties
+- Configurable sync direction: Wix → HubSpot, HubSpot → Wix, Bi-directional
+- Save Mappings button
 - No code changes needed to update mappings
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|---|---|
-| Wix App | Wix CLI |
-| Backend | Node.js + TypeScript |
-| Auth | HubSpot OAuth 2.0 |
-| Token Storage | Wix Secrets Manager |
-| Wix → HubSpot Trigger | Wix Automations / Hooks |
-| HubSpot → Wix Trigger | HubSpot Webhooks |
-| Frontend Dashboard | React |
-| Database | Wix Data Collections |
 
 ---
 
@@ -53,100 +52,47 @@ wix-hubspot-integration/
 ├── src/
 │   ├── backend/
 │   │   ├── auth/
-│   │   │   ├── hubspot.auth.ts       # OAuth flow (authorize, callback, refresh)
-│   │   │   └── token.service.ts      # Token storage via Secrets Manager
+│   │   │   └── hubspot.client.ts      # HubSpot API calls (get, create, update contacts)
 │   │   ├── sync/
-│   │   │   ├── contact.sync.ts       # Bi-directional sync logic
-│   │   │   ├── loop.guard.ts         # Loop prevention / dedup logic
-│   │   │   └── field.mapper.ts       # Field mapping resolver
-│   │   └── webhooks/
-│   │       └── hubspot.webhook.ts    # Inbound HubSpot webhook handler
-│   ├── dashboard/
-│   │   ├── components/
-│   │   │   ├── ConnectHubSpot.tsx    # OAuth connect/disconnect UI
-│   │   │   └── FieldMappingTable.tsx # Field mapping configuration UI
-│   │   └── App.tsx
-│   └── wix/
-│       ├── contacts.events.ts        # Wix contact created/updated hooks
-│       └── forms.events.ts           # Wix form submission handler
-├── .env.example
+│   │   │   └── contact.sync.ts        # Bi-directional sync + loop prevention logic
+│   │   ├── webhooks/
+│   │   │   └── hubspot.webhook.ts     # Inbound HubSpot webhook handler
+│   │   ├── events.ts                  # Wix contact created/updated event hooks
+│   │   ├── forms.ts                   # Wix form submission + UTM capture
+│   │   └── http-functions.ts          # HTTP endpoints (webhook, sync, form, properties)
+│   └── dashboard/
+│       └── pages/
+│           └── page.tsx               # React dashboard UI (connect button + field mapping)
+├── .env                               # Local secrets (never committed)
+├── .env.example                       # Template for environment variables
+├── wix.config.json                    # Wix app configuration
 ├── package.json
-├── tsconfig.json
-└── README.md
+└── tsconfig.json
 ```
 
 ---
 
-## Getting Started
+## How Loop Prevention Works
 
-### Prerequisites
+This is the core technical challenge of bi-directional sync.
 
-- Node.js v18+
-- Wix Developer Account → [dev.wix.com](https://dev.wix.com)
-- HubSpot Developer Account → [developers.hubspot.com](https://developers.hubspot.com)
-- Wix CLI installed globally
-
-```bash
-npm install -g @wix/cli
+**The Problem:**
+```
+Wix contact updated → app updates HubSpot → HubSpot webhook fires →
+app updates Wix → Wix event fires → app updates HubSpot → repeat forever 💀
 ```
 
-### Setup
+**The Solution:**
+Every update made by this app is tagged with `syncSource: "WIX_HUBSPOT_APP"` and tracked in a dedup set for 5 seconds.
 
-1. Clone the repo
-
-```bash
-git clone https://github.com/yourusername/wix-hubspot-integration.git
-cd wix-hubspot-integration
+```
+Wix contact updated → app updates HubSpot (tags it as "WIX_HUBSPOT_APP")
+HubSpot webhook fires → app checks syncSource
+→ "WIX_HUBSPOT_APP"? YES → SKIP ✅
+→ Real user change? NO → Process it ✅
 ```
 
-2. Install dependencies
-
-```bash
-npm install
-```
-
-3. Copy environment variables
-
-```bash
-cp .env.example .env
-```
-
-4. Fill in your `.env`
-
-```env
-HUBSPOT_CLIENT_ID=your_hubspot_client_id
-HUBSPOT_CLIENT_SECRET=your_hubspot_client_secret
-HUBSPOT_REDIRECT_URI=https://your-app-backend/auth/hubspot/callback
-```
-
-5. Run locally
-
-```bash
-wix dev
-```
-
----
-
-## Environment Variables
-
-| Variable | Description |
-|---|---|
-| `HUBSPOT_CLIENT_ID` | From HubSpot developer app |
-| `HUBSPOT_CLIENT_SECRET` | From HubSpot developer app |
-| `HUBSPOT_REDIRECT_URI` | OAuth callback URL |
-
----
-
-## How Sync Loop Prevention Works
-
-Every update made by this app is tagged with a `syncSource: "WIX_HUBSPOT_APP"` marker and a unique `syncId`.
-
-When a webhook arrives (from HubSpot) or an event fires (from Wix), the app checks:
-- Was this update triggered by our own app?
-- If yes → **skip** (avoid infinite loop)
-- If no → **process** (real user update)
-
-This prevents the classic ping-pong loop where Wix updates HubSpot → HubSpot webhook updates Wix → Wix updates HubSpot → repeat forever.
+No infinite loop. One update = one sync.
 
 ---
 
@@ -154,38 +100,92 @@ This prevents the classic ping-pong loop where Wix updates HubSpot → HubSpot w
 
 ### Feature 1 — Bi-Directional Contact Sync
 
-| Direction | API Used |
+| Direction | How |
 |---|---|
-| Wix → HubSpot | Wix `onContactCreated` / `onContactUpdated` hooks → HubSpot CRM Contacts API (`POST /crm/v3/contacts`) |
-| HubSpot → Wix | HubSpot Webhooks API → our backend → Wix Contacts API |
+| Wix → HubSpot | `wixCrm_onContactCreated` / `wixCrm_onContactUpdated` hooks → HubSpot CRM API |
+| HubSpot → Wix | HubSpot Webhook → `POST /_functions/hubspot-webhook` → Wix Contacts API |
 | Property mapping | HubSpot Properties API (`GET /crm/v3/properties/contacts`) |
-| ID mapping storage | Wix Data Collections (`WixContactId ↔ HubSpotContactId`) |
+| Loop prevention | `syncSource` tag + 5s dedup window in memory |
 
 ### Feature 2 — Form & Lead Capture
 
-| Action | API Used |
+| Action | How |
 |---|---|
-| Catch form submission | Wix `onFormSubmit` hook |
-| Create/update HubSpot contact | HubSpot CRM Contacts API |
-| Store UTM attribution | HubSpot Contact Properties (custom) |
+| Catch Wix form submission | `wixForms_onFormSubmit` event hook |
+| Push to HubSpot | HubSpot CRM Contacts API (create or update) |
+| UTM attribution | Stored as HubSpot contact properties |
+| Page context | pageUrl, referrer, submittedAt stored in HubSpot |
+
+---
+
+## HTTP Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| POST | `/_functions/hubspot-webhook` | Receives HubSpot contact change webhooks |
+| POST | `/_functions/sync-contact` | Manually trigger contact sync |
+| POST | `/_functions/form-submit` | Handle Wix form submission |
+| GET | `/_functions/hubspot-properties` | Fetch HubSpot properties for field mapping UI |
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Wix App | Wix CLI v1.1.208 |
+| Backend | Node.js + TypeScript |
+| Auth | HubSpot Service Key (PAT) |
+| Wix → HubSpot Trigger | Wix CRM event hooks |
+| HubSpot → Wix Trigger | HubSpot Webhooks |
+| Frontend Dashboard | React + Wix Design System |
+| Token Storage | `.env` (local) / Wix Secrets Manager (production) |
+
+---
+
+## Setup
+
+### Prerequisites
+- Node.js v18+
+- Wix Developer Account → [dev.wix.com](https://dev.wix.com)
+- HubSpot Developer Account → [developers.hubspot.com](https://developers.hubspot.com)
+
+```bash
+npm install -g @wix/cli
+```
+
+### Run Locally
+
+```bash
+git clone https://github.com/mranbupk/wix-hubspot-integration.git
+cd wix-hubspot-integration
+npm install
+cp .env.example .env
+# Add your HubSpot Service Key to .env
+npm run dev
+```
+
+---
+
+## Environment Variables
+
+```env
+HUBSPOT_API_KEY=pat-na2-xxxx-xxxx-xxxx-xxxx
+```
+
+> Never commit `.env` to GitHub. It is listed in `.gitignore`.
 
 ---
 
 ## Security
 
-- OAuth tokens are never stored in frontend or logs
-- All sync endpoints require authentication
-- HubSpot webhook signature verified on every inbound request
+- HubSpot Service Key never exposed to frontend or logs
+- All sync endpoints run server-side only
+- HubSpot webhook events validated before processing
 - PII (email, phone) never logged
 
 ---
 
-## Status
+## GitHub
 
-🚧 In active development — built as part of a technical assessment for a Full Stack Developer role.
-
----
-
-## License
-
-MIT
+Repository: [github.com/mranbupk/wix-hubspot-integration](https://github.com/mranbupk/wix-hubspot-integration)

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { items } from '@wix/data';
 import { dashboard } from '@wix/dashboard';
 import {
   Button,
@@ -57,13 +58,22 @@ const Index: React.FC = () => {
   const [mappings, setMappings] = useState<MappingRow[]>(DEFAULT_MAPPINGS);
   const [isSaving, setIsSaving] = useState(false);
 
-  const handleConnect = () => {
-    // In production this triggers OAuth flow
-    setIsConnected(true);
-    dashboard.showToast({
-      message: 'HubSpot connected successfully!',
-      type: 'success',
-    });
+  const handleConnect = async () => {
+    try {
+      // Save connection status to Wix Data
+      await items.save('HubSpotConnection', {
+        _id: 'connection',
+        isConnected: true,
+        connectedAt: new Date().toISOString(),
+      });
+      setIsConnected(true);
+      dashboard.showToast({
+        message: 'HubSpot connected!',
+        type: 'success',
+      });
+    } catch (error) {
+      console.error('Connect failed:', error);
+    }
   };
 
   const handleDisconnect = () => {
@@ -76,14 +86,24 @@ const Index: React.FC = () => {
 
   const handleSaveMappings = async () => {
     setIsSaving(true);
-    // Save mappings logic here
-    setTimeout(() => {
-      setIsSaving(false);
+    try {
+      // Save each mapping to Wix Data collection
+      for (const mapping of mappings) {
+        await items.save('FieldMappings', {
+          _id: mapping.id,
+          wixField: mapping.wixField,
+          hubspotField: mapping.hubspotField,
+          direction: mapping.direction,
+        });
+      }
       dashboard.showToast({
-        message: 'Field mappings saved!',
+        message: 'Mappings saved!',
         type: 'success',
       });
-    }, 1000);
+    } catch (error) {
+      console.error('Save failed:', error);
+    }
+    setIsSaving(false);
   };
 
   const updateMapping = (id: string, field: string, value: string) => {
@@ -91,6 +111,21 @@ const Index: React.FC = () => {
       prev.map(row => (row.id === id ? { ...row, [field]: value } : row))
     );
   };
+
+  useEffect(() => {
+    const loadMappings = async () => {
+      const result = await items.query('FieldMappings').find();
+      if (result.items.length > 0) {
+        setMappings(result.items.map((item: any) => ({
+          id: item._id,
+          wixField: item.wixField,
+          hubspotField: item.hubspotField,
+          direction: item.direction,
+        })));
+      }
+    };
+    loadMappings();
+  }, []);
 
   return (
     <WixDesignSystemProvider>

@@ -35,30 +35,34 @@ export async function syncWixContactToHubSpot(wixContact: {
     // Check if contact already exists in HubSpot
     const existing = await hubspotClient.getContact(wixContact.email);
 
+    // Read from saved field mappings
+    const { getFieldMappings } = await import('../mapping.service');
+    const mappings = await getFieldMappings();
+
+    // Build contact data from mappings
+    const contactData: Record<string, string> = {};
+    for (const mapping of mappings) {
+        if (mapping.direction !== 'hubspot_to_wix') {
+            const wixValue = (wixContact as any)[mapping.wixField] || '';
+            contactData[mapping.hubspotField] = wixValue;
+        }
+    }
+
     if (existing.total > 0) {
-        // Update existing HubSpot contact
         const hubspotId = existing.results[0].id;
         markAsSynced(wixContact.id);
 
-        await hubspotClient.updateContact(hubspotId, {
-            firstname: wixContact.firstName || '',
-            lastname: wixContact.lastName || '',
-            phone: wixContact.phone || '',
-            hs_analytics_source: SYNC_SOURCE_TAG,
-        });
+        await hubspotClient.updateContact(hubspotId, contactData);
 
         console.log(`[SYNC] Updated HubSpot contact ${hubspotId}`);
         return { action: 'updated', hubspotId };
 
     } else {
-        // Create new HubSpot contact
         markAsSynced(wixContact.id);
 
         const created = await hubspotClient.createContact({
+            ...contactData,
             email: wixContact.email,
-            firstname: wixContact.firstName || '',
-            lastname: wixContact.lastName || '',
-            phone: wixContact.phone || '',
         });
 
         console.log(`[SYNC] Created HubSpot contact ${created.id}`);
@@ -79,7 +83,55 @@ export async function syncHubSpotContactToWix(hubspotContact: {
         return { skipped: true };
     }
 
-    // TODO: Update Wix contact via Wix Contacts API
-    console.log(`[SYNC] Would update Wix contact for email: ${hubspotContact.email}`);
-    return { action: 'wix_update_pending' };
+    try {
+        // Search for existing Wix contact by email
+        // @ts-ignore
+        const { contacts } = await import('wix-crm-backend');
+
+        // Find contact in Wix by email
+        const result = await contacts.queryContacts()
+            .eq('primaryInfo.email', hubspotContact.email)
+            .find();
+
+        if (result.items.length > 0) {
+            // Contact exists — update it
+            const wixContactId = result.items[0]._id;
+
+            // Mark as synced to prevent loop
+            markAsSynced(wixContactId);
+
+            await contacts.updateContact(wixContactId, {
+                info: {
+                    name: {
+                        first: hubspotContact.firstname || '',
+                        last: hubspotContact.lastname || '',
+                    }
+                }
+            });
+
+            console.log(`[SYNC] Updated Wix contact ${wixContactId}`);
+            return { action: 'updated', wixContactId };
+
+        } else {
+            // Contact doesn't exist — create it
+            const created = await contacts.createContact({
+                info: {
+                    name: {
+                        first: hubspotContact.firstname || '',
+                        last: hubspotContact.lastname || '',
+                    },
+                    emails: {
+                        items: [{ email: hubspotContact.email }]
+                    }
+                }
+            });
+
+            console.log(`[SYNC] Created Wix contact ${created._id}`);
+            return { action: 'created', wixContactId: created._id };
+        }
+
+    } catch (error) {
+        console.error('[SYNC] Failed to sync HubSpot → Wix:', error);
+        return { action: 'error', error };
+    }
 }
